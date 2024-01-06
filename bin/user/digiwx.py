@@ -78,13 +78,17 @@ These are the fields:
 
 """
 
+# FIXME: byte vs str
+# FIXME: generic logging pattern to be applied to all drivers
+
 from __future__ import with_statement, print_function
+
+# this driver uses pyserial, not serial!  both import serial, but they are very
+# different serial implementations!
 import serial
-import syslog
 import time
 
 import weewx.drivers
-from weewx.wxformulas import calculate_rain
 
 DRIVER_NAME = 'DigiWX'
 DRIVER_VERSION = '0.1'
@@ -147,7 +151,6 @@ class DigiWXDriver(weewx.drivers.AbstractDevice):
         loginf('driver version is %s' % DRIVER_VERSION)
         self._model = stn_dict.get('model', 'WRL')
         port = stn_dict.get('port', DigiWXStation.DEFAULT_PORT)
-        self.last_rain = None
         self._station = DigiWXStation(port)
         self._station.open()
 
@@ -174,13 +177,10 @@ class DigiWXDriver(weewx.drivers.AbstractDevice):
             'usUnits': weewx.US,
             'windDir': data.get('wind_dir'),
             'windSpeed': data.get('wind_speed'),
-            'inTemp': data.get('temperature_in'),
-            'outTemp': data.get('temperature_out'),
+            'outTemp': data.get('temperature'),
             'outHumidity': data.get('humidity'),
             'pressure': data.get('pressure'),
-            'rain': calculate_rain(data['rain_total'], self.last_rain)
         }
-        self.last_rain = data['rain_total']
         return pkt
 
 
@@ -191,8 +191,8 @@ class DigiWXStation(object):
         self.port = port
         self.baudrate = 19200
         self.timeout = 3 # seconds
-        self.max_tries = max_tries
-        self.retry_wait = retry_wait
+        self.max_tries = 3
+        self.retry_wait = 3
         self.serial_port = None
 
     def __enter__(self):
@@ -215,7 +215,8 @@ class DigiWXStation(object):
 
     def get_data(self):
         buf = self.serial_port.readline()
-        logdbg("station said: %s" % ' '.join(["%0.2X" % ord(c) for c in buf]))
+        print("type: %s" % type(buf))
+#        logdbg("station said: %s" % ' '.join(["%0.2X" % ord(c) for c in buf]))
         buf = buf.strip()
         return buf
 
@@ -278,6 +279,7 @@ class DigiWXStation(object):
 # PYTHONPATH=bin python digiwx.py
 
 if __name__ == '__main__':
+    import syslog
     import optparse
 
     usage = """%prog [options] [--debug] [--help]"""
