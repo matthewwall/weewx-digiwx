@@ -1,0 +1,27 @@
+weewx-digiwx
+Copyright 2024 Matthew Wall
+Distributed under terms of the GPLv3
+
+This is a driver for weeWX that collects data from DigiWX hardware.
+
+===============================================================================
+Installation
+
+0) install weeWX
+
+1) install this driver
+
+weectl extension install https://github.com/matthewwall/weewx-digiwx/archive/master.zip
+
+2) configure weeWX to use this driver
+
+weectl station reconfigure
+
+3) start weeWX
+
+
+===============================================================================
+Configuration
+
+[DigiWX]
+    port = /dev/ttyS0
