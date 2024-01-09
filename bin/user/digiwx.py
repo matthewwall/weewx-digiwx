@@ -7,8 +7,6 @@ DigiWX emits data over the serial port, every 5 seconds.  Here are samples:
 
 DW,-007,-014,057,020,006,999,017,29.98,+99999,+03700,004,000,001,000,000,44,04.22,N,068,49.10,W,ME55 ,VINALHAVEN,122.7000,00,U,000,330,110,+020,+007,10,NA,NA,000000,159,01024,00,0,99999,99999,99999,0,CLR,999,CLR,999,CLR,999,CLR,999,71
 
-DW,-004,-013,053,290,000,999,999,30.07,+99999,+04200,004,000,001,000,000,44,04.22,N,068,49.10,W,ME55 ,VINALHAVEN,122.7000,00,U,000,999,999,+024,+009,10,NA,NA,000000,159,01024,00,0,99999,99999,99999,0,CLR,999,CLR,999,CLR,999,CLR,999,77
-
 shot1
 DW,-004,-012,054,300,003,999,999,30.07,+99999,+04000,004,000,001,000,000,44,04.22,N,068,49.10,W,ME55 ,VINALHAVEN,122.7000,00,U,000,999,999,+024,+010,10,NA,NA,000000,159,01024,00,0,99999,99999,99999,0,CLR,999,CLR,999,CLR,999,CLR,999,70
 
@@ -78,16 +76,25 @@ These are the fields:
 
 """
 
+# FIXME: byte vs str
+# FIXME: generic logging pattern to be applied to all drivers
+
 from __future__ import with_statement, print_function
 import serial
-import syslog
 import time
 
 import weewx.drivers
-from weewx.wxformulas import calculate_rain
+import weewx.units
 
 DRIVER_NAME = 'DigiWX'
 DRIVER_VERSION = '0.1'
+
+
+def C_to_F(x):
+    return weewx.units.CtoF(x)
+
+def knot_to_mph(x):
+    return x / 0.868976242
 
 
 def loader(config_dict, _):
@@ -147,7 +154,6 @@ class DigiWXDriver(weewx.drivers.AbstractDevice):
         loginf('driver version is %s' % DRIVER_VERSION)
         self._model = stn_dict.get('model', 'WRL')
         port = stn_dict.get('port', DigiWXStation.DEFAULT_PORT)
-        self.last_rain = None
         self._station = DigiWXStation(port)
         self._station.open()
 
@@ -172,15 +178,13 @@ class DigiWXDriver(weewx.drivers.AbstractDevice):
         pkt = {
             'dateTime': int(time.time() + 0.5),
             'usUnits': weewx.US,
-            'windDir': data.get('wind_dir'),
-            'windSpeed': data.get('wind_speed'),
-            'inTemp': data.get('temperature_in'),
-            'outTemp': data.get('temperature_out'),
-            'outHumidity': data.get('humidity'),
-            'pressure': data.get('pressure'),
-            'rain': calculate_rain(data['rain_total'], self.last_rain)
+            'windDir': data.get('wind_dir'), # degree
+            'windSpeed': knot_to_mph(data.get('wind_speed')), # knot
+            'outTemp': C_to_F(data.get('temperature')), # C
+            'outHumidity': data.get('humidity'), # %
+            'pressure': data.get('pressure'), # inHg
+            'dewpoint': C_to_F(data.get('dewpoint')), # C
         }
-        self.last_rain = data['rain_total']
         return pkt
 
 
@@ -189,10 +193,10 @@ class DigiWXStation(object):
 
     def __init__(self, port):
         self.port = port
-        self.baudrate = 19200
+        self.baudrate = 9600
         self.timeout = 3 # seconds
-        self.max_tries = max_tries
-        self.retry_wait = retry_wait
+        self.max_tries = 3
+        self.retry_wait = 3
         self.serial_port = None
 
     def __enter__(self):
@@ -214,8 +218,11 @@ class DigiWXStation(object):
             self.serial_port = None
 
     def get_data(self):
+        import codecs
         buf = self.serial_port.readline()
-        logdbg("station said: %s" % ' '.join(["%0.2X" % ord(c) for c in buf]))
+        # readline returns 'bytes' so convert to string
+        buf = buf.decode('ascii')
+#        logdbg("station said: %s" % ' '.join(["%0.2X" % ord(c) for c in buf]))
         buf = buf.strip()
         return buf
 
@@ -239,20 +246,17 @@ class DigiWXStation(object):
 
     @staticmethod
     def parse_current(s):
-        # sample responses:
-        # DW,-004,-013,053,290,000,999,999,30.07,+99999,+04200,004,000,001,000,
-        # 000,44,04.22,N,068,49.10,W,ME55 ,VINALHAVEN,122.7000,00,U,000,999,
-        # 999,+024,+009,10,NA,NA,000000,159,01024,00,0,99999,99999,99999,0,CLR,
-        # 999,CLR,999,CLR,999,CLR,999,77
         parts = s.split(',')
-        data = {
-            'temperature': DigiWXStation.parse_int(parts[1]), # C
-            'dewpoint': DigiWXStation.parse_int(parts[21]), # C
-            'humidity': DigiWXStation.parse_int(parts[3]), # %
-            'wind_dir': DigiWXStation.parse_int(parts[4]), # degree
-            'wind_speed': DigiWXStation.parse_int(parts[5]), # knot
-            'pressure': DigiWXStation.parse_float(parts[8]), # inHg
-        }
+        data = dict()
+        if len(parts) > 8:
+            data = {
+                'temperature': DigiWXStation.parse_int(parts[1]), # C
+                'dewpoint': DigiWXStation.parse_int(parts[2]), # C
+                'humidity': DigiWXStation.parse_int(parts[3]), # %
+                'wind_dir': DigiWXStation.parse_int(parts[4]), # degree
+                'wind_speed': DigiWXStation.parse_int(parts[5]), # knot
+                'pressure': DigiWXStation.parse_float(parts[8]), # inHg
+            }
         return data
 
     @staticmethod
@@ -278,6 +282,7 @@ class DigiWXStation(object):
 # PYTHONPATH=bin python digiwx.py
 
 if __name__ == '__main__':
+    import syslog
     import optparse
 
     usage = """%prog [options] [--debug] [--help]"""
