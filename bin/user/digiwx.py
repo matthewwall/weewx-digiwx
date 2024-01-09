@@ -94,10 +94,10 @@ DRIVER_VERSION = '0.1'
 
 
 def C_to_F(x):
-    return weewx.units.CtoF(x)
+    return weewx.units.CtoF(x) if x is not None else None
 
 def knot_to_mph(x):
-    return x / 0.868976242
+    return x / 0.868976242 if x is not None else None
 
 
 def loader(config_dict, _):
@@ -174,8 +174,11 @@ class DigiWXDriver(weewx.drivers.AbstractDevice):
                 logdbg("raw data: %s" % raw)
                 data = DigiWXStation.parse_current(raw)
                 logdbg("parsed data: %s" % data)
-                packet = self._data_to_packet(data)
-                yield packet
+                if data:
+                    packet = self._data_to_packet(data)
+                    yield packet
+                else:
+                    time.sleep(0.5)
 
     def _data_to_packet(self, data):
         pkt = {
@@ -193,10 +196,11 @@ class DigiWXDriver(weewx.drivers.AbstractDevice):
 
 class DigiWXStation(object):
     DEFAULT_PORT = '/dev/ttyS0'
+    DEFAULT_BAUD = 9600
 
-    def __init__(self, port):
+    def __init__(self, port, baud=9600):
         self.port = port
-        self.baudrate = 9600
+        self.baudrate = baud
         self.timeout = 3 # seconds
         self.max_tries = 3
         self.retry_wait = 3
@@ -221,12 +225,16 @@ class DigiWXStation(object):
             self.serial_port = None
 
     def get_data(self):
-        import codecs
-        buf = self.serial_port.readline()
-        # readline returns 'bytes' so convert to string
-        buf = buf.decode('ascii')
-        logdbg("station said: %s" % buf)
-        buf = buf.strip()
+        buf = ''
+        try:
+            buf = self.serial_port.readline()
+            # readline returns 'bytes' so convert to string
+            buf = buf.decode('ascii')
+            buf = buf.strip()
+            logdbg("station said: %s" % buf)
+        except UnicodeDecodeError as e:
+            logerr("decode failed: %s" % e)
+            buf = ''
         return buf
 
     def get_data_with_retry(self):
@@ -251,7 +259,7 @@ class DigiWXStation(object):
     def parse_current(s):
         parts = s.split(',')
         data = dict()
-        if len(parts) > 8:
+        if len(parts) == 53:
             data = {
                 'temperature': DigiWXStation.parse_int(parts[1]), # C
                 'dewpoint': DigiWXStation.parse_int(parts[2]), # C
@@ -293,13 +301,16 @@ if __name__ == '__main__':
     syslog.openlog('wee_digiwx', syslog.LOG_PID | syslog.LOG_CONS)
     syslog.setlogmask(syslog.LOG_UPTO(syslog.LOG_INFO))
     parser = optparse.OptionParser(usage=usage)
-    parser.add_option('--version', dest='version', action='store_true',
+    parser.add_option('--version', action='store_true',
                       help='display driver version')
-    parser.add_option('--debug', dest='debug', action='store_true',
+    parser.add_option('--debug', action='store_true',
                       help='display diagnostic information while running')
-    parser.add_option('--port', dest='port', metavar='PORT',
+    parser.add_option('--port',
                       help='serial port to which the station is connected',
                       default=DigiWXStation.DEFAULT_PORT)
+    parser.add_option('--baud',
+                      help='speed of the serial port',
+                      default=DigiWXStation.DEFAULT_BAUD)
 
     (options, args) = parser.parse_args()
 
@@ -310,9 +321,8 @@ if __name__ == '__main__':
     if options.debug:
         syslog.setlogmask(syslog.LOG_UPTO(syslog.LOG_DEBUG))
 
-    with DigiWXStation(options.port) as s:
+    with DigiWXStation(options.port, options.baud) as s:
         while True:
             raw = s.get_current()
             print("raw:", raw)
             print("parsed:", DigiWXStation.parse_current(raw))
-            time.sleep(5)
