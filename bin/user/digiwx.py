@@ -80,6 +80,9 @@ These are the fields:
 # FIXME: generic logging pattern to be applied to all drivers
 
 from __future__ import with_statement, print_function
+
+# this driver uses pyserial, not serial!  both import serial, but they are very
+# different serial implementations!
 import serial
 import time
 
@@ -222,7 +225,7 @@ class DigiWXStation(object):
         buf = self.serial_port.readline()
         # readline returns 'bytes' so convert to string
         buf = buf.decode('ascii')
-#        logdbg("station said: %s" % ' '.join(["%0.2X" % ord(c) for c in buf]))
+        logdbg("station said: %s" % buf)
         buf = buf.strip()
         return buf
 
